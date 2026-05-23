@@ -21,8 +21,6 @@ const MODEL_STORAGE_KEY = "briefly-model-id";
 const CHAT_THREADS_STORAGE_KEY = "briefly-chat-threads";
 const ACTIVE_CHAT_THREAD_STORAGE_KEY = "briefly-active-chat-thread";
 const BYOP_STATE_STORAGE_KEY = "briefly-byop-state";
-const POLLINATIONS_CLIENT_ID =
-  process.env.NEXT_PUBLIC_POLLINATIONS_CLIENT_ID ?? "";
 const DEFAULT_BYOP_BUDGET = "10";
 const DEFAULT_BYOP_EXPIRY_DAYS = "7";
 type WorkspaceView = ToolId | "chat";
@@ -41,6 +39,10 @@ type ChatThread = {
   context: ChatSeed | null;
   messages: ChatMessage[];
   updatedAt: number;
+};
+
+type BrieflyWorkspaceProps = {
+  pollinationsClientId?: string;
 };
 
 function buildInitialState(): ToolStateMap {
@@ -340,7 +342,9 @@ function getRedirectUri() {
   return `${window.location.origin}/app`;
 }
 
-export function BrieflyWorkspace() {
+export function BrieflyWorkspace({
+  pollinationsClientId = "",
+}: BrieflyWorkspaceProps) {
   const [toolState, setToolState] = useState<ToolStateMap>(buildInitialState);
   const [activeView, setActiveView] = useState<WorkspaceView>("meeting-notes");
   const [apiKey, setApiKey] = useState("");
@@ -645,9 +649,9 @@ export function BrieflyWorkspace() {
   }
 
   function handleConnectPollinations() {
-    if (!POLLINATIONS_CLIENT_ID) {
+    if (!pollinationsClientId) {
       setByopNotice(
-        "Missing NEXT_PUBLIC_POLLINATIONS_CLIENT_ID. Add your pk_... key first.",
+        "Missing POLLINATIONS_CLIENT_ID. Add your pk_... key first.",
       );
       setSettingsOpen(true);
       return;
@@ -656,7 +660,7 @@ export function BrieflyWorkspace() {
     const redirectUri = getRedirectUri();
     const state = createByopState();
     const params = new URLSearchParams({
-      client_id: POLLINATIONS_CLIENT_ID,
+      client_id: pollinationsClientId,
       redirect_uri: redirectUri,
       budget: DEFAULT_BYOP_BUDGET,
       expiry: DEFAULT_BYOP_EXPIRY_DAYS,

@@ -94,12 +94,14 @@ Copy `.env.example` to `.env.local` for local development.
 Available variables:
 
 ```bash
+POLLINATIONS_CLIENT_ID=
 NEXT_PUBLIC_POLLINATIONS_CLIENT_ID=
 POLLINATIONS_API_KEY=
 POLLINATIONS_TEXT_MODEL=
 ```
 
 Notes:
+- `POLLINATIONS_CLIENT_ID` is the recommended runtime env for Docker or server deploys
 - `NEXT_PUBLIC_POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) for the official BYOP connect flow
 - `POLLINATIONS_API_KEY` is optional server-side fallback auth
 - `POLLINATIONS_TEXT_MODEL` is optional if you want a server default model

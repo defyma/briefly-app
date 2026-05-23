@@ -1,5 +1,10 @@
 import { BrieflyWorkspace } from "@/components/briefly-workspace";
 
 export default function WorkspacePage() {
-  return <BrieflyWorkspace />;
+  const pollinationsClientId =
+    process.env.POLLINATIONS_CLIENT_ID ||
+    process.env.NEXT_PUBLIC_POLLINATIONS_CLIENT_ID ||
+    "";
+
+  return <BrieflyWorkspace pollinationsClientId={pollinationsClientId} />;
 }
