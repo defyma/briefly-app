@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { BrieflyLogo } from "@/components/briefly-logo";
 
 import {
   BYOP_AUTH_MODELS,
@@ -747,9 +748,10 @@ export function BrieflyWorkspace() {
         <header className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.18)] backdrop-blur">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <p className="font-mono text-sm uppercase tracking-[0.25em] text-stone-400">
-                Briefly Workspace
-              </p>
+              <BrieflyLogo
+                imageClassName="h-11 w-auto"
+                variant="dark"
+              />
               <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
                 Three focused tools, one calmer workflow.
               </h1>

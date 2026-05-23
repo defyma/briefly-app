@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrieflyLogo } from "@/components/briefly-logo";
 
 export default function Home() {
   const products = [
@@ -29,9 +30,9 @@ export default function Home() {
       <section className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-6 py-8 sm:px-10 lg:px-12">
         <header className="flex items-center justify-between">
           <div>
-            <p className="font-mono text-sm uppercase tracking-[0.28em] text-stone-500">
-              Briefly
-            </p>
+            <BrieflyLogo
+              imageClassName="h-11 w-auto"
+            />
             <p className="mt-2 text-sm text-stone-600">
               Productivity copilot for messy notes, big goals, and replies.
             </p>
