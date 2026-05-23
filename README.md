@@ -1,6 +1,6 @@
 # Briefly
 
-Briefly is a lightweight productivity app built for the Pollinations showcase.
+Briefly is a productivity workspace for turning messy input into clear action.
 
 It focuses on fast, structured output instead of a generic chatbot flow:
 - `Meeting Notes`
