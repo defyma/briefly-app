@@ -1,0 +1,9 @@
+services:
+  briefly:
+    image: ghcr.io/defyma/briefly-app:latest
+    container_name: briefly-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env

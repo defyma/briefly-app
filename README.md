@@ -1,36 +1,176 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Briefly
 
-## Getting Started
+Briefly is a productivity app built for the `pollinations.ai` showcase.
 
-First, run the development server:
+It combines three practical AI tools in one workspace:
+- `Meeting Notes`
+- `Task Breakdown`
+- `Reply Draft`
+
+The goal is simple: turn messy input into usable output fast.
+
+## What Briefly Does
+
+### 1. Meeting Notes
+Input:
+- pasted meeting notes
+- rough transcript
+
+Output:
+- summary
+- decisions
+- action items
+- open questions
+
+### 2. Task Breakdown
+Input:
+- a big goal or project target
+
+Output:
+- step-by-step tasks
+- priorities
+- execution order
+- simple checklist
+
+### 3. Reply Draft
+Input:
+- email, chat, or message context
+
+Output:
+- concise reply draft
+- tone options
+- follow-up message
+
+## Product Direction
+
+Briefly is designed to feel:
+- practical
+- fast
+- clean
+- showcase-friendly
+
+It is intentionally not a generic chatbot. Each tool is focused on producing a structured result that can be used immediately.
+
+## Pollinations Integration
+
+Briefly is built around the `pollinations.ai` ecosystem and is planned for `Bring Your Own Pollen (BYOP)` usage.
+
+Current behavior:
+- if a Pollinations token is available, Briefly sends generation requests through the local Next.js API route
+- if no token is available, Briefly falls back to local structured output so the workspace still works as an MVP
+
+References:
+- Showcase: https://pollinations.ai/apps
+- BYOP docs: https://gen.pollinations.ai/docs#tag/bring-your-own-pollen
+- Pollinations: https://pollinations.ai
+
+## Tech Stack
+
+- `Next.js`
+- `TypeScript`
+- `Tailwind CSS`
+
+Main app structure:
+- `/` landing page
+- `/app` main workspace
+- `/api/generate` generation route
+
+## Local Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment Variables
 
-## Learn More
+Copy `.env.example` into `.env.local` if needed.
 
-To learn more about Next.js, take a look at the following resources:
+Available variables:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+NEXT_PUBLIC_POLLINATIONS_CLIENT_ID=
+POLLINATIONS_API_KEY=
+POLLINATIONS_TEXT_MODEL=
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Notes:
+- `NEXT_PUBLIC_POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) used for the official BYOP redirect flow
+- `POLLINATIONS_API_KEY` lets the server route call Pollinations without requiring a token from the browser
+- users can also paste their own token in the app for BYOP usage
+- `POLLINATIONS_TEXT_MODEL` is optional and can be used if you want to force a specific model
 
-## Deploy on Vercel
+Recommended Redirect URIs for this app:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```text
+https://briefly-app.defyma.com/app
+http://localhost:3000/app
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Verification
+
+Lint:
+
+```bash
+npm run lint
+```
+
+Production build:
+
+```bash
+npm run build
+```
+
+## Deployment
+
+This repo is set up so Docker images can be built by GitHub Actions and pushed to GitHub Container Registry.
+
+Included files:
+- `Dockerfile`
+- `.dockerignore`
+- `.github/workflows/docker-publish.yml`
+- `docker-compose.yml`
+
+Expected flow:
+1. push to `main`
+2. GitHub Actions builds the image
+3. image is pushed to `ghcr.io/<owner>/<repo>`
+4. server runs `docker compose pull && docker compose up -d`
+
+Default image reference in `docker-compose.yml`:
+
+```yaml
+ghcr.io/defyma/briefly-app:latest
+```
+
+Before using it on the server:
+- make sure the GitHub repository owner and package name match the image path you want
+- create a `.env` file on the server with the production environment variables
+- if the GHCR package is private, log in first with `docker login ghcr.io`
+
+## Current MVP Status
+
+Implemented:
+- landing page for Briefly
+- workspace for 3 tools
+- local BYOP token input
+- `/api/generate` route
+- structured fallback output when live Pollinations access is unavailable
+
+Next:
+- improve prompt quality per tool
+- polish BYOP onboarding
+- add deployment container setup

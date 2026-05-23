@@ -1,26 +1,111 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5f0e8;
+  --foreground: #1f1a17;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+a {
+  text-decoration: none;
+}
+
+.animated-border-card {
+  position: relative;
+  border-radius: 2rem;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      120deg,
+      rgba(34, 211, 238, 0.9),
+      rgba(96, 165, 250, 0.35),
+      rgba(168, 85, 247, 0.85),
+      rgba(251, 191, 36, 0.35),
+      rgba(34, 211, 238, 0.9)
+    );
+  background-size: 220% 220%;
+  animation: border-shift 7s linear infinite;
+  padding: 1px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 0 24px rgba(34, 211, 238, 0.12),
+    0 0 40px rgba(168, 85, 247, 0.12);
+}
+
+.animated-border-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.18), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(168, 85, 247, 0.16), transparent 24%);
+  pointer-events: none;
+}
+
+.animated-border-inner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  border-radius: calc(2rem - 1px);
+}
+
+.thinking-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.thinking-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background:
+    linear-gradient(
+      120deg,
+      rgba(34, 211, 238, 0.92),
+      rgba(96, 165, 250, 0.3),
+      rgba(168, 85, 247, 0.9),
+      rgba(96, 165, 250, 0.3),
+      rgba(34, 211, 238, 0.92)
+    );
+  background-size: 220% 220%;
+  animation: border-shift 4s linear infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 1;
+}
+
+@keyframes border-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 220% 50%;
+  }
 }

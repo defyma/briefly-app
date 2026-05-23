@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# internal docs
+/docs/
+
 # production
 /build
 
