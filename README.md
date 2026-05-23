@@ -1,79 +1,71 @@
 # Briefly
 
-Briefly is a productivity app built for the `pollinations.ai` showcase.
+Briefly is a lightweight productivity app built for the Pollinations showcase.
 
-It combines three practical AI tools in one workspace:
+It focuses on fast, structured output instead of a generic chatbot flow:
 - `Meeting Notes`
 - `Task Breakdown`
 - `Reply Draft`
+- `Chat` for follow-up discussion and revision
 
-The goal is simple: turn messy input into usable output fast.
+## What It Does
 
-## What Briefly Does
-
-### 1. Meeting Notes
-Input:
-- pasted meeting notes
-- rough transcript
-
-Output:
+### Meeting Notes
+Turn rough notes or transcripts into:
 - summary
 - decisions
 - action items
 - open questions
 
-### 2. Task Breakdown
-Input:
-- a big goal or project target
-
-Output:
-- step-by-step tasks
+### Task Breakdown
+Turn a big goal into:
+- steps
 - priorities
 - execution order
-- simple checklist
+- checklist
 
-### 3. Reply Draft
-Input:
-- email, chat, or message context
-
-Output:
-- concise reply draft
+### Reply Draft
+Turn message context into:
+- draft reply
 - tone options
-- follow-up message
+- follow-up
 
-## Product Direction
+### Chat
+Continue from any generated result:
+- refine
+- revise
+- brainstorm next steps
 
-Briefly is designed to feel:
-- practical
-- fast
-- clean
-- showcase-friendly
+## Pollinations Flow
 
-It is intentionally not a generic chatbot. Each tool is focused on producing a structured result that can be used immediately.
+Briefly uses Pollinations text generation through local Next.js API routes:
+- `/api/generate`
+- `/api/chat`
 
-## Pollinations Integration
+The app is built around the official Bring Your Own Pollen redirect flow.
 
-Briefly is built around the `pollinations.ai` ecosystem and is planned for `Bring Your Own Pollen (BYOP)` usage.
+Current BYOP setup:
+- user clicks `Connect Pollinations`
+- app redirects to Pollinations authorization
+- Pollinations returns `#api_key=sk_...` to `/app`
+- the key is stored in local storage on that browser
+- the selected model is limited to the same allowed model list used during BYOP authorization
 
-Current behavior:
-- if a Pollinations token is available, Briefly sends generation requests through the local Next.js API route
-- if no token is available, Briefly falls back to local structured output so the workspace still works as an MVP
-
-References:
-- Showcase: https://pollinations.ai/apps
-- BYOP docs: https://gen.pollinations.ai/docs#tag/bring-your-own-pollen
-- Pollinations: https://pollinations.ai
+If no usable Pollinations key is available, Briefly falls back to local structured output.
 
 ## Tech Stack
 
-- `Next.js`
+- `Next.js 16`
+- `React 19`
 - `TypeScript`
-- `Tailwind CSS`
+- `Tailwind CSS v4`
 
-Main app structure:
+## Routes
+
 - `/` landing page
 - `/app` main workspace
-- `/api/generate` generation route
+- `/api/generate` structured tool output
+- `/api/chat` follow-up chat output
 
 ## Local Development
 
@@ -83,7 +75,7 @@ Install dependencies:
 npm install
 ```
 
-Run the development server:
+Run the app:
 
 ```bash
 npm run dev
@@ -95,9 +87,9 @@ Open:
 http://localhost:3000
 ```
 
-## Environment Variables
+## Environment
 
-Copy `.env.example` into `.env.local` if needed.
+Copy `.env.example` to `.env.local` for local development.
 
 Available variables:
 
@@ -108,12 +100,11 @@ POLLINATIONS_TEXT_MODEL=
 ```
 
 Notes:
-- `NEXT_PUBLIC_POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) used for the official BYOP redirect flow
-- `POLLINATIONS_API_KEY` lets the server route call Pollinations without requiring a token from the browser
-- users can also paste their own token in the app for BYOP usage
-- `POLLINATIONS_TEXT_MODEL` is optional and can be used if you want to force a specific model
+- `NEXT_PUBLIC_POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) for the official BYOP connect flow
+- `POLLINATIONS_API_KEY` is optional server-side fallback auth
+- `POLLINATIONS_TEXT_MODEL` is optional if you want a server default model
 
-Recommended Redirect URIs for this app:
+Recommended redirect URIs:
 
 ```text
 https://briefly-app.defyma.com/app
@@ -128,49 +119,48 @@ Lint:
 npm run lint
 ```
 
-Production build:
+Build:
 
 ```bash
 npm run build
 ```
 
-## Deployment
+## Docker Deploy
 
-This repo is set up so Docker images can be built by GitHub Actions and pushed to GitHub Container Registry.
-
-Included files:
+This repo includes:
 - `Dockerfile`
 - `.dockerignore`
-- `.github/workflows/docker-publish.yml`
 - `docker-compose.yml`
+- `.github/workflows/docker-publish.yml`
 
-Expected flow:
-1. push to `main`
-2. GitHub Actions builds the image
-3. image is pushed to `ghcr.io/<owner>/<repo>`
-4. server runs `docker compose pull && docker compose up -d`
-
-Default image reference in `docker-compose.yml`:
+Default compose image:
 
 ```yaml
 ghcr.io/defyma/briefly-app:latest
 ```
 
-Before using it on the server:
-- make sure the GitHub repository owner and package name match the image path you want
-- create a `.env` file on the server with the production environment variables
-- if the GHCR package is private, log in first with `docker login ghcr.io`
+Workflow behavior:
+- push to `main` triggers image build
+- image is published to `ghcr.io/defyma/briefly-app`
+- server can run `docker compose pull && docker compose up -d`
 
-## Current MVP Status
+Example `docker-compose.yml` expects:
 
-Implemented:
-- landing page for Briefly
-- workspace for 3 tools
-- local BYOP token input
-- `/api/generate` route
-- structured fallback output when live Pollinations access is unavailable
+```yaml
+services:
+  briefly:
+    image: ghcr.io/defyma/briefly-app:latest
+    container_name: briefly-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+```
 
-Next:
-- improve prompt quality per tool
-- polish BYOP onboarding
-- add deployment container setup
+## Links
+
+- App repo: `https://github.com/defyma/briefly-app`
+- Pollinations: `https://pollinations.ai`
+- Showcase: `https://pollinations.ai/apps`
+- BYOP docs: `https://gen.pollinations.ai/docs#tag/bring-your-own-pollen`
