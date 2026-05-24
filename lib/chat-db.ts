@@ -45,9 +45,6 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at
       ON chat_threads(updated_at DESC);
 
-    CREATE INDEX IF NOT EXISTS idx_chat_threads_owner_updated_at
-      ON chat_threads(owner_key, updated_at DESC);
-
     CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id
       ON chat_messages(thread_id, created_at ASC, id ASC);
   `);
@@ -59,11 +56,12 @@ function getDb() {
 
   if (!hasOwnerKeyColumn) {
     db.exec(`ALTER TABLE chat_threads ADD COLUMN owner_key TEXT;`);
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_chat_threads_owner_updated_at
-        ON chat_threads(owner_key, updated_at DESC);
-    `);
   }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_chat_threads_owner_updated_at
+      ON chat_threads(owner_key, updated_at DESC);
+  `);
 
   dbInstance = db;
   return db;
