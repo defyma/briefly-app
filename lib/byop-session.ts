@@ -1,7 +1,8 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 
 const COOKIE_NAME = "briefly-byop-session";
+const CHAT_SCOPE_COOKIE_NAME = "briefly-chat-scope";
 const COOKIE_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function getSessionKey() {
@@ -65,4 +66,39 @@ export async function writeByopTokenToSession(token: string) {
 export async function clearByopTokenSession() {
   const store = await cookies();
   store.delete(COOKIE_NAME);
+}
+
+function hashScopeValue(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function ensureBrowserChatScopeId() {
+  const store = await cookies();
+  const existingValue = store.get(CHAT_SCOPE_COOKIE_NAME)?.value?.trim();
+
+  if (existingValue) {
+    return existingValue;
+  }
+
+  const scopeId = randomUUID();
+  store.set(CHAT_SCOPE_COOKIE_NAME, scopeId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: COOKIE_TTL_SECONDS,
+  });
+
+  return scopeId;
+}
+
+export async function readChatOwnerKey() {
+  const byopToken = await readByopTokenFromSession();
+
+  if (byopToken) {
+    return `acct:${hashScopeValue(byopToken)}`;
+  }
+
+  const browserScopeId = await ensureBrowserChatScopeId();
+  return `anon:${hashScopeValue(browserScopeId)}`;
 }

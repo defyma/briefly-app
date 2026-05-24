@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import type { ChatMessage, ChatSeed } from "@/lib/briefly-tools";
+import { readChatOwnerKey } from "@/lib/byop-session";
 import { createChatThread, listChatThreadPreviews } from "@/lib/chat-db";
 
 export const dynamic = "force-dynamic";
@@ -54,8 +55,9 @@ function normalizeContext(value: unknown): ChatSeed | null {
 }
 
 export async function GET() {
+  const ownerKey = await readChatOwnerKey();
   return NextResponse.json({
-    threads: listChatThreadPreviews(),
+    threads: listChatThreadPreviews(ownerKey),
   });
 }
 
@@ -71,6 +73,7 @@ export async function POST(request: Request) {
   const title = typeof payload.title === "string" ? payload.title.trim() : "";
   const messages = normalizeMessages(payload.messages);
   const context = normalizeContext(payload.context);
+  const ownerKey = await readChatOwnerKey();
 
   if (!title) {
     return NextResponse.json({ error: "title is required." }, { status: 400 });
@@ -87,6 +90,7 @@ export async function POST(request: Request) {
     context,
     id: `thread-${randomUUID()}`,
     messages,
+    ownerKey,
     title,
   });
 
