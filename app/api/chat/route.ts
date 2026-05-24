@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ChatSeed,
 } from "@/lib/briefly-tools";
+import { readByopTokenFromSession } from "@/lib/byop-session";
 
 export const dynamic = "force-dynamic";
 
@@ -92,8 +93,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const token = providedKey || process.env.POLLINATIONS_API_KEY || "";
-  const authSource = getAuthSource(providedKey || undefined);
+  const sessionToken = await readByopTokenFromSession();
+  const token = providedKey || sessionToken || process.env.POLLINATIONS_API_KEY || "";
+  const authSource = getAuthSource(providedKey || sessionToken || undefined);
   const resolvedModel = requestedModel || process.env.POLLINATIONS_TEXT_MODEL || "";
   const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
   const language = detectLanguage(

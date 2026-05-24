@@ -7,8 +7,13 @@ import {
   normalizeModelResult,
   type ToolId,
 } from "@/lib/briefly-tools";
+import { readByopTokenFromSession } from "@/lib/byop-session";
 
 export const dynamic = "force-dynamic";
+
+const POLLINATIONS_ENDPOINT = "https://gen.pollinations.ai/v1/chat/completions";
+const PRIMARY_TIMEOUT_MS = 30_000;
+const RETRY_TIMEOUT_MS = 20_000;
 
 type GenerateRequest = {
   toolId?: unknown;
@@ -35,6 +40,51 @@ function getAuthSource(apiKey: string | undefined) {
   }
 
   return "anonymous" as const;
+}
+
+async function requestStructuredResult(params: {
+  token: string;
+  prompt: ReturnType<typeof buildPrompt>;
+  model?: string;
+  timeoutMs: number;
+  useResponseFormat: boolean;
+}) {
+  const { token, prompt, model, timeoutMs, useResponseFormat } = params;
+  const endpoint = new URL(POLLINATIONS_ENDPOINT);
+  endpoint.searchParams.set("key", token);
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+      ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
+      ...(model ? { model } : {}),
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  const rawText = await response.text();
+  const data = JSON.parse(rawText) as {
+    error?: unknown;
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    error:
+      typeof data.error === "string"
+        ? data.error
+        : `Pollinations responded with ${response.status}.`,
+    content: data.choices?.[0]?.message?.content,
+  };
 }
 
 export async function POST(request: Request) {
@@ -80,8 +130,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const authSource = getAuthSource(providedKey || undefined);
-  const token = providedKey || process.env.POLLINATIONS_API_KEY || "";
+  const sessionToken = await readByopTokenFromSession();
+  const authSource = getAuthSource(providedKey || sessionToken || undefined);
+  const token = providedKey || sessionToken || process.env.POLLINATIONS_API_KEY || "";
   const resolvedModel = requestedModel || process.env.POLLINATIONS_TEXT_MODEL || "";
 
   if (!token) {
@@ -91,66 +142,71 @@ export async function POST(request: Request) {
     });
   }
 
-  const endpoint = new URL("https://gen.pollinations.ai/v1/chat/completions");
-  endpoint.searchParams.set("key", token);
-
   const prompt = buildPrompt(tool, input);
 
+  let lastError = "";
+
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: "system", content: prompt.system },
-          { role: "user", content: prompt.user },
-        ],
-        response_format: { type: "json_object" },
-        ...(resolvedModel ? { model: resolvedModel } : {}),
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
+    const attempts = [
+      { timeoutMs: PRIMARY_TIMEOUT_MS, useResponseFormat: true },
+      { timeoutMs: RETRY_TIMEOUT_MS, useResponseFormat: false },
+    ] as const;
 
-    if (!response.ok) {
-      const fallback = buildFallbackResult(tool.id, input, authSource);
-
-      return NextResponse.json({
-        ...fallback,
-        ...(resolvedModel ? { model: resolvedModel } : {}),
-        warning: `Pollinations responded with ${response.status}. Showing Briefly fallback output instead.`,
+    for (const attempt of attempts) {
+      const response = await requestStructuredResult({
+        token,
+        prompt,
+        model: resolvedModel || undefined,
+        timeoutMs: attempt.timeoutMs,
+        useResponseFormat: attempt.useResponseFormat,
       });
+
+      if (!response.ok) {
+        lastError = response.error;
+        continue;
+      }
+
+      if (typeof response.content !== "string") {
+        lastError = "Pollinations returned no content.";
+        continue;
+      }
+
+      const normalized = normalizeModelResult(
+        tool,
+        response.content,
+        authSource,
+        resolvedModel || undefined,
+      );
+
+      if (normalized) {
+        return NextResponse.json(normalized);
+      }
+
+      lastError = "Pollinations content could not be parsed.";
     }
 
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content;
-
-    if (typeof content !== "string") {
-      throw new Error("Pollinations returned no content.");
-    }
-
-    const normalized = normalizeModelResult(
-      tool,
-      content,
-      authSource,
-      resolvedModel || undefined,
-    );
-
-    if (!normalized) {
-      throw new Error("Pollinations content could not be parsed.");
-    }
-
-    return NextResponse.json(normalized);
-  } catch {
     const fallback = buildFallbackResult(tool.id, input, authSource);
 
     return NextResponse.json({
       ...fallback,
       ...(resolvedModel ? { model: resolvedModel } : {}),
+      warning:
+        lastError ||
+        "Pollinations did not return a usable structured result. Showing Briefly fallback output instead.",
+    });
+  } catch (error) {
+    const fallback = buildFallbackResult(tool.id, input, authSource);
+    const warning =
+      error instanceof Error
+        ? error.name === "TimeoutError"
+          ? "Pollinations timed out while generating a structured result. Showing Briefly fallback output instead."
+          : error.message
+        : undefined;
+
+    return NextResponse.json({
+      ...fallback,
+      ...(resolvedModel ? { model: resolvedModel } : {}),
+      ...(warning ? { warning } : {}),
     });
   }
 }

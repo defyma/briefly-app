@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrieflyLogo } from "@/components/briefly-logo";
 
 import {
@@ -16,13 +16,15 @@ import {
   type ToolId,
 } from "@/lib/briefly-tools";
 
-const STORAGE_KEY = "briefly-byop-token";
 const MODEL_STORAGE_KEY = "briefly-model-id";
 const CHAT_THREADS_STORAGE_KEY = "briefly-chat-threads";
 const ACTIVE_CHAT_THREAD_STORAGE_KEY = "briefly-active-chat-thread";
+const ACTIVE_VIEW_STORAGE_KEY = "briefly-active-view";
 const BYOP_STATE_STORAGE_KEY = "briefly-byop-state";
 const DEFAULT_BYOP_BUDGET = "10";
 const DEFAULT_BYOP_EXPIRY_DAYS = "7";
+const CHAT_INPUT_MIN_HEIGHT = 32;
+const CHAT_INPUT_MAX_HEIGHT = 160;
 type WorkspaceView = ToolId | "chat";
 
 type ToolState = {
@@ -44,6 +46,15 @@ type ChatThread = {
 type BrieflyWorkspaceProps = {
   pollinationsClientId?: string;
 };
+
+function isWorkspaceView(value: string): value is WorkspaceView {
+  return (
+    value === "meeting-notes" ||
+    value === "task-breakdown" ||
+    value === "reply-draft" ||
+    value === "chat"
+  );
+}
 
 function buildInitialState(): ToolStateMap {
   return {
@@ -311,10 +322,7 @@ function RenderChatMessage({ content }: { content: string }) {
 
 function ChatLoading() {
   return (
-    <div className="mt-4 flex items-start gap-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm font-medium text-white">
-        AI
-      </div>
+    <div className="mt-4 flex items-start">
       <div className="flex max-w-3xl flex-1 flex-col rounded-[1.5rem] border border-white/10 bg-white/[0.03] px-5 py-4">
         <div className="flex items-center gap-3 text-lg italic text-stone-300">
           <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-cyan-300" />
@@ -345,10 +353,11 @@ function getRedirectUri() {
 export function BrieflyWorkspace({
   pollinationsClientId = "",
 }: BrieflyWorkspaceProps) {
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [toolState, setToolState] = useState<ToolStateMap>(buildInitialState);
   const [activeView, setActiveView] = useState<WorkspaceView>("meeting-notes");
-  const [apiKey, setApiKey] = useState("");
-  const [persistToken, setPersistToken] = useState(true);
+  const [byopConnected, setByopConnected] = useState(false);
   const [byopNotice, setByopNotice] = useState("");
   const [copiedToolId, setCopiedToolId] = useState<ToolId | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL_ID);
@@ -361,20 +370,21 @@ export function BrieflyWorkspace({
   const [copiedChatKey, setCopiedChatKey] = useState<string | null>(null);
   const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
   const [activeChatThreadId, setActiveChatThreadId] = useState<string | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   useEffect(() => {
-    const savedToken = window.localStorage.getItem(STORAGE_KEY) ?? "";
     const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY) ?? DEFAULT_MODEL_ID;
-
-    if (savedToken) {
-      setApiKey(savedToken);
-    }
+    const savedActiveView = window.localStorage.getItem(ACTIVE_VIEW_STORAGE_KEY);
 
     setSelectedModel(
       BYOP_MODEL_OPTIONS.some((model) => model.id === savedModel)
         ? savedModel
         : DEFAULT_MODEL_ID,
     );
+
+    if (savedActiveView && isWorkspaceView(savedActiveView)) {
+      setActiveView(savedActiveView);
+    }
 
     const savedThreads = window.localStorage.getItem(CHAT_THREADS_STORAGE_KEY);
     const savedActiveThread = window.localStorage.getItem(
@@ -394,59 +404,82 @@ export function BrieflyWorkspace({
       setActiveChatThreadId(savedActiveThread);
     }
 
-    const hash = window.location.hash.startsWith("#")
-      ? window.location.hash.slice(1)
-      : "";
+    async function syncByopSession(apiKey: string) {
+      const response = await fetch("/api/byop/session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = (await response.json()) as { connected?: boolean; error?: string };
 
-    if (!hash) {
-      return;
-    }
-
-    const params = new URLSearchParams(hash);
-    const returnedKey = params.get("api_key")?.trim() ?? "";
-    const returnedState = params.get("state")?.trim() ?? "";
-    const returnedError = params.get("error")?.trim() ?? "";
-    const expectedState =
-      window.localStorage.getItem(BYOP_STATE_STORAGE_KEY) ?? "";
-
-    if (returnedKey) {
-      if (expectedState && returnedState && expectedState !== returnedState) {
-        setByopNotice("BYOP state mismatch. Please connect again.");
-      } else {
-        setApiKey(returnedKey);
-        setPersistToken(true);
-        setSettingsOpen(true);
-        setByopNotice("Pollinations connected. Your BYOP key is ready.");
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to save BYOP session.");
       }
-    } else if (returnedError === "access_denied") {
-      setByopNotice("Pollinations access was denied.");
-      setSettingsOpen(true);
+
+      setByopConnected(Boolean(data.connected));
     }
 
-    window.localStorage.removeItem(BYOP_STATE_STORAGE_KEY);
-    window.history.replaceState(
-      null,
-      "",
-      `${window.location.pathname}${window.location.search}`,
-    );
+    async function initialize() {
+      const sessionResponse = await fetch("/api/byop/session", {
+        cache: "no-store",
+      });
+      const sessionData = (await sessionResponse.json()) as { connected?: boolean };
+      setByopConnected(Boolean(sessionData.connected));
+
+      const hash = window.location.hash.startsWith("#")
+        ? window.location.hash.slice(1)
+        : "";
+
+      if (!hash) {
+        return;
+      }
+
+      const params = new URLSearchParams(hash);
+      const returnedKey = params.get("api_key")?.trim() ?? "";
+      const returnedState = params.get("state")?.trim() ?? "";
+      const returnedError = params.get("error")?.trim() ?? "";
+      const expectedState =
+        window.localStorage.getItem(BYOP_STATE_STORAGE_KEY) ?? "";
+
+      if (returnedKey) {
+        if (expectedState && returnedState && expectedState !== returnedState) {
+          setByopNotice("BYOP state mismatch. Please connect again.");
+        } else {
+          try {
+            await syncByopSession(returnedKey);
+            setSettingsOpen(true);
+            setByopNotice("Pollinations connected. Your BYOP session is ready.");
+          } catch (error) {
+            setByopNotice(
+              error instanceof Error ? error.message : "Failed to save BYOP session.",
+            );
+          }
+        }
+      } else if (returnedError === "access_denied") {
+        setByopNotice("Pollinations access was denied.");
+        setSettingsOpen(true);
+      }
+
+      window.localStorage.removeItem(BYOP_STATE_STORAGE_KEY);
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}`,
+      );
+    }
+
+    void initialize();
   }, []);
-
-  useEffect(() => {
-    if (!persistToken) {
-      window.localStorage.removeItem(STORAGE_KEY);
-      return;
-    }
-
-    if (apiKey) {
-      window.localStorage.setItem(STORAGE_KEY, apiKey);
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-  }, [apiKey, persistToken]);
 
   useEffect(() => {
     window.localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    window.localStorage.setItem(ACTIVE_VIEW_STORAGE_KEY, activeView);
+  }, [activeView]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -489,6 +522,31 @@ export function BrieflyWorkspace({
     }
   }, [chatThreads, activeChatThreadId]);
 
+  useEffect(() => {
+    const textarea = chatInputRef.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    textarea.style.height = `${CHAT_INPUT_MIN_HEIGHT}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, CHAT_INPUT_MAX_HEIGHT)}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
+  }, [chatInput]);
+
+  useEffect(() => {
+    const container = chatScrollRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 160);
+  }, [chatMessages, activeChatThreadId, activeView]);
+
   const resolvedModel = selectedModel;
   const activeToolId = activeView === "chat" ? chatContext?.toolId || "meeting-notes" : activeView;
   const activeTool = TOOL_DEFINITIONS.find((tool) => tool.id === activeToolId)!;
@@ -526,7 +584,6 @@ export function BrieflyWorkspace({
         body: JSON.stringify({
           toolId,
           input: current.input,
-          apiKey: apiKey.trim() || undefined,
           model: resolvedModel || undefined,
         }),
       });
@@ -673,8 +730,12 @@ export function BrieflyWorkspace({
   }
 
   function handleDisconnectPollinations() {
-    setApiKey("");
-    setByopNotice("Saved BYOP key removed from this browser.");
+    void fetch("/api/byop/session", {
+      method: "DELETE",
+    }).then(() => {
+      setByopConnected(false);
+      setByopNotice("Saved BYOP session removed from this browser.");
+    });
   }
 
   async function handleSendChat() {
@@ -699,6 +760,7 @@ export function BrieflyWorkspace({
     setChatInput("");
     setChatError("");
     setChatLoading(true);
+    scrollChatToBottomSoon();
 
     try {
       const response = await fetch("/api/chat", {
@@ -707,7 +769,6 @@ export function BrieflyWorkspace({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          apiKey: apiKey.trim() || undefined,
           model: resolvedModel || undefined,
           context: chatContext || undefined,
           messages: nextMessages,
@@ -737,6 +798,7 @@ export function BrieflyWorkspace({
           updatedAt: Date.now(),
         }));
       }
+      scrollChatToBottomSoon();
     } catch (error) {
       setChatError(
         error instanceof Error ? error.message : "Something went wrong in chat.",
@@ -744,6 +806,374 @@ export function BrieflyWorkspace({
     } finally {
       setChatLoading(false);
     }
+  }
+
+  function handleChatInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleSendChat();
+  }
+
+  function handleChatScroll() {
+    const container = chatScrollRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    setShowScrollToBottom(distanceFromBottom > 160);
+  }
+
+  function scrollChatToBottom() {
+    const container = chatScrollRef.current;
+
+    if (!container) {
+      return;
+    }
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
+  }
+
+  function scrollChatToBottomSoon() {
+    window.requestAnimationFrame(() => {
+      scrollChatToBottom();
+    });
+  }
+
+  if (activeView === "chat") {
+    return (
+      <main className="h-screen overflow-hidden bg-black text-stone-50">
+        <div className="grid h-full min-h-0 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col border-r border-white/10 bg-black/95">
+            <div className="border-b border-white/10 px-5 py-5">
+              <BrieflyLogo
+                imageClassName="h-10 w-auto"
+                variant="dark"
+              />
+            </div>
+
+            <div className="space-y-3 px-4 py-4">
+              <button
+                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-medium text-stone-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                type="button"
+                onClick={() => setActiveView("meeting-notes")}
+              >
+                <span>&larr; Back to Tool Workspace</span>
+                <span className="text-stone-500">↗</span>
+              </button>
+            </div>
+
+            <div className="px-5 pb-3 pt-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-stone-500">
+                  Recents
+                </p>
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-stone-400">
+                  {resolvedModel}
+                </div>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+              {chatThreads.length > 0 ? (
+                [...chatThreads]
+                  .sort((a, b) => b.updatedAt - a.updatedAt)
+                  .map((thread) => (
+                    <button
+                      key={thread.id}
+                      className={`mb-2 w-full rounded-2xl px-4 py-3 text-left text-sm transition ${
+                        thread.id === activeChatThreadId
+                          ? "bg-white/20 text-white"
+                          : "text-stone-300 hover:bg-white/10 hover:text-white"
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        setActiveChatThreadId(thread.id);
+                        setActiveView("chat");
+                      }}
+                    >
+                      <p className="truncate font-medium">{thread.title}</p>
+                    </button>
+                  ))
+              ) : (
+                <div className="mx-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-stone-500">
+                  No recent threads yet. Generate a result first, then use `Discuss in Chat`.
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-white/10 px-4 py-4">
+              <button
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+                type="button"
+                onClick={() => setSettingsOpen((value) => !value)}
+              >
+                {settingsOpen ? "Hide BYOP settings" : "Show BYOP settings"}
+              </button>
+              {settingsOpen ? (
+                <div className="mt-3 rounded-2xl border border-emerald-400/15 bg-emerald-400/10 p-4">
+                  <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-emerald-50/80">
+                    <span className="rounded-full border border-white/10 px-3 py-1">
+                      {byopConnected ? "connected" : "not connected"}
+                    </span>
+                    <span className="rounded-full border border-white/10 px-3 py-1">
+                      /app
+                    </span>
+                  </div>
+                  <button
+                    className="mt-3 w-full rounded-2xl bg-white px-4 py-3 text-sm font-medium text-stone-950 transition hover:bg-stone-200"
+                    type="button"
+                    onClick={
+                      byopConnected
+                        ? handleDisconnectPollinations
+                        : handleConnectPollinations
+                    }
+                  >
+                    {byopConnected ? "Disconnect Pollinations" : "Connect Pollinations"}
+                  </button>
+                  <label className="mt-3 block text-xs uppercase tracking-[0.18em] text-emerald-50/75">
+                    Model
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none"
+                    value={selectedModel}
+                    onChange={(event) => setSelectedModel(event.target.value)}
+                  >
+                    {BYOP_MODEL_OPTIONS.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.id} = {model.label}
+                      </option>
+                    ))}
+                  </select>
+                  {byopNotice ? (
+                    <p className="mt-3 rounded-2xl border border-emerald-300/20 bg-emerald-200/10 px-4 py-3 text-sm text-emerald-50">
+                      {byopNotice}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="relative flex min-h-0 flex-col bg-black">
+            <div className="flex items-center justify-between gap-4 border-b border-white/10 px-6 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-base font-medium text-white">
+                  {chatThreads.find((thread) => thread.id === activeChatThreadId)?.title ||
+                    chatContext?.toolName ||
+                    "Briefly Chat"}
+                </p>
+              </div>
+              <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs uppercase tracking-[0.18em] text-stone-400 md:block">
+                {byopConnected ? "BYOP connected" : "Fallback mode"}
+              </div>
+            </div>
+
+            <div
+              ref={chatScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto"
+              onScroll={handleChatScroll}
+            >
+              {chatMessages.length > 0 ? (
+                <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-8 px-6 py-8">
+                  {chatMessages.map((message, index) => {
+                    const messageKey = `${message.role}-${index}`;
+                    const isSeedContext = message.kind === "seed-context";
+                    const copyButton = (
+                      <button
+                        aria-label="Copy message"
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-stone-400 opacity-0 transition hover:border-white/20 hover:text-white group-hover:opacity-100"
+                        type="button"
+                        onClick={() =>
+                          void handleCopyChatMessage(messageKey, message.content)
+                        }
+                      >
+                        {copiedChatKey === messageKey ? (
+                          <span className="text-[10px] uppercase tracking-[0.18em]">
+                            Copied
+                          </span>
+                        ) : (
+                          <svg
+                            aria-hidden="true"
+                            className="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <rect
+                              height="12"
+                              rx="2.5"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              width="12"
+                              x="8"
+                              y="4"
+                            />
+                            <rect
+                              height="12"
+                              rx="2.5"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              width="12"
+                              x="4"
+                              y="8"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                    );
+
+                    return (
+                      <div
+                        key={messageKey}
+                        className={`group flex items-start gap-4 ${
+                          message.role === "user" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        {message.role === "assistant" ? (
+                          <>
+                            <div className="max-w-3xl flex-1">
+                              <div
+                                className={`text-base leading-8 text-stone-200 ${
+                                  isSeedContext
+                                    ? "rounded-[1.5rem] border border-cyan-300/20 bg-cyan-200/[0.07] px-6 py-5"
+                                    : ""
+                                }`}
+                              >
+                                {isSeedContext ? (
+                                  <div>
+                                    <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-cyan-200/80">
+                                      Seed context
+                                    </p>
+                                    <RenderChatMessage content={message.content} />
+                                  </div>
+                                ) : (
+                                  <RenderChatMessage content={message.content} />
+                                )}
+                              </div>
+                              <div className="mt-4">{copyButton}</div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="max-w-xl">
+                            <div className="rounded-[1.75rem] bg-white/16 px-6 py-4 text-base leading-8 text-white">
+                              <RenderChatMessage content={message.content} />
+                            </div>
+                            <div className="mt-4 flex justify-end">{copyButton}</div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {chatLoading ? <ChatLoading /> : null}
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center px-6">
+                  <div className="max-w-2xl text-center">
+                    <p className="text-4xl font-medium tracking-[-0.04em] text-white">
+                      Briefly Chat
+                    </p>
+                    <p className="mt-4 text-base leading-8 text-stone-500">
+                      Start from any tool result, click `Discuss in Chat`, then continue the work here with a full-screen thread.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {showScrollToBottom ? (
+              <button
+                aria-label="Scroll to bottom"
+                className="absolute bottom-28 left-1/2 z-10 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full border border-white/10 bg-white/[0.08] text-white shadow-[0_10px_30px_rgba(0,0,0,0.35)] transition hover:bg-white/[0.14]"
+                type="button"
+                onClick={scrollChatToBottom}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-7 w-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M12 5v14M12 19l-6-6M12 19l6-6"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.2"
+                  />
+                </svg>
+              </button>
+            ) : null}
+
+            <div className="border-t border-white/10 bg-black/95 px-4 py-4">
+              <div className="mx-auto max-w-5xl">
+                <div className="relative rounded-[2rem] border border-white/10 bg-white/[0.08] px-5 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.35)]">
+                  <textarea
+                    ref={chatInputRef}
+                    rows={1}
+                    className="w-full resize-none bg-transparent py-2 pr-16 text-base leading-8 text-stone-100 outline-none placeholder:text-stone-500"
+                    placeholder="Ask anything about this thread..."
+                    style={{
+                      minHeight: `${CHAT_INPUT_MIN_HEIGHT}px`,
+                      maxHeight: `${CHAT_INPUT_MAX_HEIGHT}px`,
+                    }}
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={handleChatInputKeyDown}
+                  />
+                  <div className="absolute bottom-3 right-3 flex items-center justify-end">
+                    <button
+                      aria-label={chatLoading ? "Sending" : "Send"}
+                      className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-stone-950 transition hover:bg-stone-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={chatLoading}
+                      type="button"
+                      onClick={() => void handleSendChat()}
+                    >
+                      {chatLoading ? (
+                        <span className="text-xs font-medium uppercase tracking-[0.18em]">
+                          ...
+                        </span>
+                      ) : (
+                        <svg
+                          aria-hidden="true"
+                          className="h-6 w-6"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            d="M12 5v14M12 5l-6 6M12 5l6 6"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2.2"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {chatError ? (
+                  <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                    {chatError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -776,7 +1206,7 @@ export function BrieflyWorkspace({
 
           <div className="mt-6 flex flex-wrap gap-3">
             <div className="rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm text-stone-300">
-              {apiKey ? "BYOP connected" : "Fallback mode"}
+              {byopConnected ? "BYOP connected" : "Fallback mode"}
             </div>
             <div className="rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm text-stone-300">
               Model: {resolvedModel || "none"}
@@ -799,7 +1229,7 @@ export function BrieflyWorkspace({
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    {!apiKey ? (
+                    {!byopConnected ? (
                       <button
                         className="rounded-full bg-white px-5 py-3 text-sm font-medium text-stone-950 transition hover:bg-stone-100"
                         type="button"
@@ -808,7 +1238,7 @@ export function BrieflyWorkspace({
                         Connect Pollinations
                       </button>
                     ) : null}
-                    {apiKey ? (
+                    {byopConnected ? (
                       <button
                         className="rounded-full border border-white/10 px-5 py-3 text-sm font-medium text-white transition hover:border-white/20 hover:bg-white/5"
                         type="button"
@@ -821,7 +1251,7 @@ export function BrieflyWorkspace({
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2 text-xs uppercase tracking-[0.18em] text-emerald-50/75">
                   <span className="rounded-full border border-white/10 px-3 py-2">
-                    {apiKey ? "connected" : "not connected"}
+                    {byopConnected ? "connected" : "not connected"}
                   </span>
                   <span className="rounded-full border border-white/10 px-3 py-2">
                     budget {DEFAULT_BYOP_BUDGET}
@@ -851,7 +1281,7 @@ export function BrieflyWorkspace({
               </div>
 
               <div className="text-sm text-emerald-100 lg:col-span-2">
-                The BYOP key stays in local storage on this browser after approval.
+                The BYOP key is stored in a secure server session for this browser after approval.
               </div>
 
               {byopNotice ? (
@@ -895,211 +1325,6 @@ export function BrieflyWorkspace({
           </button>
         </div>
 
-        {activeView === "chat" ? (
-          <div className="mt-6 grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="rounded-[2rem] border border-white/10 bg-white/5 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
-                    Chat
-                  </p>
-                  <h2 className="mt-2 text-2xl font-medium text-white">Recent</h2>
-                </div>
-                <div className="rounded-full border border-white/10 bg-black/20 px-3 py-2 text-xs uppercase tracking-[0.18em] text-stone-300">
-                  {resolvedModel}
-                </div>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                {chatThreads.length > 0 ? (
-                  [...chatThreads]
-                    .sort((a, b) => b.updatedAt - a.updatedAt)
-                    .map((thread) => (
-                      <button
-                        key={thread.id}
-                        className={`w-full rounded-[1.5rem] border px-4 py-4 text-left transition ${
-                          thread.id === activeChatThreadId
-                            ? "border-cyan-300/30 bg-cyan-200/10"
-                            : "border-white/10 bg-black/20 hover:border-white/20 hover:bg-white/5"
-                        }`}
-                        type="button"
-                        onClick={() => {
-                          setActiveChatThreadId(thread.id);
-                          setActiveView("chat");
-                        }}
-                      >
-                        <p className="truncate text-sm font-medium text-white">
-                          {thread.title}
-                        </p>
-                      </button>
-                    ))
-                ) : (
-                  <div className="rounded-[1.5rem] border border-white/10 bg-black/20 p-4 text-sm leading-6 text-stone-400">
-                    No recent threads yet. Generate a result first, then use `Discuss in Chat`.
-                  </div>
-                )}
-              </div>
-            </aside>
-
-            <section
-              className={`flex min-h-[42rem] flex-col rounded-[2rem] border p-0 ${
-                chatLoading
-                  ? "thinking-shell border-transparent bg-[#171414]"
-                  : "border-white/10 bg-[#171414]"
-              }`}
-            >
-              <div className="border-b border-white/8 px-6 py-5">
-                <p className="text-xs uppercase tracking-[0.25em] text-stone-500">
-                  Briefly Chat
-                </p>
-                <p className="mt-2 text-sm text-stone-400">
-                  Review, refine, or continue the current thread with the same model.
-                </p>
-              </div>
-
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="flex-1 overflow-auto px-6 py-6">
-                  {chatMessages.length > 0 ? (
-                    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-                      {chatMessages.map((message, index) => {
-                        const messageKey = `${message.role}-${index}`;
-                        const isSeedContext = message.kind === "seed-context";
-                        const copyButton = (
-                          <button
-                            aria-label="Copy message"
-                            className="mt-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/10 bg-black/10 text-stone-300 transition hover:border-white/20 hover:text-white"
-                            type="button"
-                            onClick={() =>
-                              void handleCopyChatMessage(messageKey, message.content)
-                            }
-                          >
-                            {copiedChatKey === messageKey ? (
-                              <span className="text-[11px] uppercase tracking-[0.18em]">
-                                Copied
-                              </span>
-                            ) : (
-                              <svg
-                                aria-hidden="true"
-                                className="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                xmlns="http://www.w3.org/2000/svg"
-                              >
-                                <rect
-                                  height="12"
-                                  rx="2.5"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  width="12"
-                                  x="8"
-                                  y="4"
-                                />
-                                <rect
-                                  height="12"
-                                  rx="2.5"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  width="12"
-                                  x="4"
-                                  y="8"
-                                />
-                              </svg>
-                            )}
-                          </button>
-                        );
-
-                        return (
-                          <div
-                            key={messageKey}
-                            className={`flex items-start gap-4 ${
-                              message.role === "user" ? "justify-end" : "justify-start"
-                            }`}
-                          >
-                            {message.role === "assistant" ? (
-                              <>
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm font-medium text-white">
-                                  AI
-                                </div>
-                                <div
-                                  className={`max-w-[78%] px-6 py-4 text-sm leading-7 text-stone-200 ${
-                                    isSeedContext
-                                      ? "rounded-[1.5rem] border border-cyan-300/20 bg-cyan-200/[0.07]"
-                                      : "rounded-[2rem] border border-white/10 bg-white/[0.03]"
-                                  }`}
-                                >
-                                  {isSeedContext ? (
-                                    <div>
-                                      <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-cyan-200/80">
-                                        Seed context
-                                      </p>
-                                      <RenderChatMessage content={message.content} />
-                                    </div>
-                                  ) : (
-                                    <RenderChatMessage content={message.content} />
-                                  )}
-                                </div>
-                                {copyButton}
-                              </>
-                            ) : (
-                              <>
-                                {copyButton}
-                                <div className="max-w-[60%] rounded-[2rem] bg-[#2a241f] px-6 py-4 text-sm leading-7 text-stone-100">
-                                  <RenderChatMessage content={message.content} />
-                                </div>
-                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-200 text-sm font-semibold text-stone-950">
-                                  U
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {chatLoading ? <ChatLoading /> : null}
-                    </div>
-                  ) : (
-                    <div className="flex h-full items-center justify-center px-6">
-                      <div className="max-w-xl rounded-[2rem] border border-dashed border-white/10 px-8 py-10 text-center text-sm leading-7 text-stone-500">
-                        Start from any tool result, click `Discuss in Chat`, then continue the work here like a focused chat thread.
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t border-white/8 px-4 py-4">
-                  <div className="mx-auto max-w-4xl">
-                    <div className="rounded-[2rem] border border-white/10 bg-white/[0.03] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
-                      <textarea
-                        className="min-h-28 w-full resize-none bg-transparent px-3 py-3 text-sm text-stone-100 outline-none placeholder:text-stone-500"
-                        placeholder="Ask for a revision, deeper explanation, or a follow-up version..."
-                        value={chatInput}
-                        onChange={(event) => setChatInput(event.target.value)}
-                      />
-                      <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/8 px-3 pt-3">
-                        <div className="text-xs uppercase tracking-[0.18em] text-stone-500">
-                          {chatContext ? `Context: ${chatContext.toolName}` : "No context seeded"}
-                        </div>
-                        <button
-                          className="rounded-full bg-white px-5 py-3 text-sm font-medium text-stone-950 transition hover:bg-stone-200 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={chatLoading}
-                          type="button"
-                          onClick={() => void handleSendChat()}
-                        >
-                          {chatLoading ? "Sending..." : "Send"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {chatError ? (
-                      <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-                        {chatError}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        ) : (
         <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
           <section className="rounded-[2rem] border border-white/10 bg-white/5 p-5">
               <h2 className="text-2xl font-medium text-white">{activeTool.name}</h2>
@@ -1160,15 +1385,6 @@ export function BrieflyWorkspace({
                     {activeTool.introLabel}
                   </p>
                 </div>
-                {activeState.result ? (
-                  <button
-                    className="rounded-full border border-white/10 px-3 py-2 text-xs text-stone-300 transition hover:border-white/30 hover:text-white"
-                    type="button"
-                    onClick={() => handleCopy(activeTool.id)}
-                  >
-                    {copiedToolId === activeTool.id ? "Copied" : "Copy"}
-                  </button>
-                ) : null}
               </div>
 
               {activeState.isLoading ? (
@@ -1192,13 +1408,20 @@ export function BrieflyWorkspace({
                         </div>
                       </div>
                     </div>
-                    <div className="mt-4">
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
                       <button
                         className="rounded-full border border-cyan-200/20 bg-cyan-200/10 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-cyan-100 transition hover:bg-cyan-200/20"
                         type="button"
                         onClick={() => handleDiscussInChat(activeTool.id)}
                       >
                         Discuss in Chat
+                      </button>
+                      <button
+                        className="rounded-full border border-white/10 px-3 py-2 text-xs text-stone-300 transition hover:border-white/30 hover:text-white"
+                        type="button"
+                        onClick={() => handleCopy(activeTool.id)}
+                      >
+                        {copiedToolId === activeTool.id ? "Copied" : "Copy"}
                       </button>
                     </div>
                     <p className="mt-4 text-sm leading-7 text-stone-300">
@@ -1242,7 +1465,6 @@ export function BrieflyWorkspace({
             </div>
           </section>
         </div>
-        )}
       </section>
       <footer className="mx-auto w-full max-w-7xl px-6 pb-8 pt-2 text-sm text-stone-500 sm:px-10 lg:px-12">
         <div className="flex flex-col gap-3 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">

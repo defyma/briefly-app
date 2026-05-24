@@ -48,7 +48,7 @@ Current BYOP setup:
 - user clicks `Connect Pollinations`
 - app redirects to Pollinations authorization
 - Pollinations returns `#api_key=sk_...` to `/app`
-- the key is stored in local storage on that browser
+- the key is exchanged into an encrypted `httpOnly` session cookie
 - the selected model is limited to the same allowed model list used during BYOP authorization
 
 If no usable Pollinations key is available, Briefly falls back to local structured output.
@@ -95,14 +95,14 @@ Available variables:
 
 ```bash
 POLLINATIONS_CLIENT_ID=
-NEXT_PUBLIC_POLLINATIONS_CLIENT_ID=
+BRIEFLY_SESSION_SECRET=
 POLLINATIONS_API_KEY=
 POLLINATIONS_TEXT_MODEL=
 ```
 
 Notes:
-- `POLLINATIONS_CLIENT_ID` is the recommended runtime env for Docker or server deploys
-- `NEXT_PUBLIC_POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) for the official BYOP connect flow
+- `POLLINATIONS_CLIENT_ID` is the Pollinations App Key (`pk_...`) used by the BYOP connect flow
+- `BRIEFLY_SESSION_SECRET` is required to encrypt the BYOP session cookie on the server
 - `POLLINATIONS_API_KEY` is optional server-side fallback auth
 - `POLLINATIONS_TEXT_MODEL` is optional if you want a server default model
 
