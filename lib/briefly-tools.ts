@@ -39,7 +39,7 @@ export type GeneratedBrief = {
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
-  kind?: "seed-context" | "default";
+  kind?: "seed-context" | "default" | "history-summary";
 };
 
 export type ChatSeed = {
