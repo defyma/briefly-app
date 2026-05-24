@@ -23,6 +23,7 @@ function getDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_threads (
       id TEXT PRIMARY KEY,
+      owner_key TEXT,
       tool_id TEXT,
       tool_name TEXT,
       summary TEXT,
@@ -44,9 +45,25 @@ function getDb() {
     CREATE INDEX IF NOT EXISTS idx_chat_threads_updated_at
       ON chat_threads(updated_at DESC);
 
+    CREATE INDEX IF NOT EXISTS idx_chat_threads_owner_updated_at
+      ON chat_threads(owner_key, updated_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id
       ON chat_messages(thread_id, created_at ASC, id ASC);
   `);
+
+  const threadColumns = db
+    .prepare(`PRAGMA table_info(chat_threads)`)
+    .all() as Array<Record<string, unknown>>;
+  const hasOwnerKeyColumn = threadColumns.some((column) => column.name === "owner_key");
+
+  if (!hasOwnerKeyColumn) {
+    db.exec(`ALTER TABLE chat_threads ADD COLUMN owner_key TEXT;`);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_chat_threads_owner_updated_at
+        ON chat_threads(owner_key, updated_at DESC);
+    `);
+  }
 
   dbInstance = db;
   return db;
@@ -128,29 +145,30 @@ export function listChatThreads() {
   );
 }
 
-export function listChatThreadPreviews() {
+export function listChatThreadPreviews(ownerKey: string) {
   const db = getDb();
   const threadRows = db
     .prepare(
-      `SELECT id, tool_id, tool_name, summary, title, updated_at
+      `SELECT id, owner_key, tool_id, tool_name, summary, title, updated_at
        FROM chat_threads
+       WHERE owner_key = ?
        ORDER BY updated_at DESC
        LIMIT 24`,
     )
-    .all() as Record<string, unknown>[];
+    .all(ownerKey) as Record<string, unknown>[];
 
   return threadRows.map((row) => mapThreadRow(row, []));
 }
 
-export function getChatThread(threadId: string) {
+export function getChatThread(threadId: string, ownerKey: string) {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, tool_id, tool_name, summary, title, updated_at
+      `SELECT id, owner_key, tool_id, tool_name, summary, title, updated_at
        FROM chat_threads
-       WHERE id = ?`,
+       WHERE id = ? AND owner_key = ?`,
     )
-    .get(threadId) as Record<string, unknown> | undefined;
+    .get(threadId, ownerKey) as Record<string, unknown> | undefined;
 
   if (!row) {
     return null;
@@ -174,18 +192,20 @@ export function createChatThread(params: {
   context: ChatSeed | null;
   id: string;
   messages: ChatMessage[];
+  ownerKey: string;
   title: string;
 }) {
-  const { context, id, messages, title } = params;
+  const { context, id, messages, ownerKey, title } = params;
   const db = getDb();
   const now = Date.now();
 
   db.prepare(
     `INSERT INTO chat_threads (
-      id, tool_id, tool_name, summary, title, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      id, owner_key, tool_id, tool_name, summary, title, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
+    ownerKey,
     context?.toolId ?? null,
     context?.toolName ?? null,
     context?.summary ?? null,
@@ -209,12 +229,20 @@ export function createChatThread(params: {
     );
   }
 
-  return getChatThread(id);
+  return getChatThread(id, ownerKey);
 }
 
-export function appendChatMessage(threadId: string, message: ChatMessage) {
+export function appendChatMessage(threadId: string, ownerKey: string, message: ChatMessage) {
   const db = getDb();
   const now = Date.now();
+
+  const threadExists = db
+    .prepare(`SELECT 1 FROM chat_threads WHERE id = ? AND owner_key = ?`)
+    .get(threadId, ownerKey);
+
+  if (!threadExists) {
+    return false;
+  }
 
   db.prepare(
     `INSERT INTO chat_messages (thread_id, role, kind, content, created_at)
@@ -222,9 +250,14 @@ export function appendChatMessage(threadId: string, message: ChatMessage) {
   ).run(threadId, message.role, message.kind ?? null, message.content, now);
 
   db.prepare(`UPDATE chat_threads SET updated_at = ? WHERE id = ?`).run(now, threadId);
+  return true;
 }
 
-export function replaceChatMessages(threadId: string, messages: ChatMessage[]) {
+export function replaceChatMessages(
+  threadId: string,
+  ownerKey: string,
+  messages: ChatMessage[],
+) {
   const db = getDb();
   const now = Date.now();
   const insertMessage = db.prepare(
@@ -233,6 +266,14 @@ export function replaceChatMessages(threadId: string, messages: ChatMessage[]) {
   );
 
   const transaction = db.transaction(() => {
+    const threadExists = db
+      .prepare(`SELECT 1 FROM chat_threads WHERE id = ? AND owner_key = ?`)
+      .get(threadId, ownerKey);
+
+    if (!threadExists) {
+      return;
+    }
+
     db.prepare(`DELETE FROM chat_messages WHERE thread_id = ?`).run(threadId);
 
     for (const [index, message] of messages.entries()) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { readChatOwnerKey } from "@/lib/byop-session";
 import { getChatThread } from "@/lib/chat-db";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,8 @@ type RouteParams = {
 
 export async function GET(_: Request, context: RouteParams) {
   const { threadId } = await context.params;
-  const thread = getChatThread(threadId);
+  const ownerKey = await readChatOwnerKey();
+  const thread = getChatThread(threadId, ownerKey);
 
   if (!thread) {
     return NextResponse.json({ error: "Thread not found." }, { status: 404 });

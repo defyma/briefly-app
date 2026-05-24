@@ -7,7 +7,7 @@ import {
   buildChatPrompt,
   detectLanguage,
 } from "@/lib/briefly-tools";
-import { readByopTokenFromSession } from "@/lib/byop-session";
+import { readByopTokenFromSession, readChatOwnerKey } from "@/lib/byop-session";
 import { compactChatMessagesWithAgent } from "@/lib/chat-compaction";
 import { buildChatMessagesForModel } from "@/lib/chat-compaction";
 import {
@@ -129,11 +129,12 @@ async function maybeCompactThread(params: {
   context: ChatSeed | null;
   language: ReturnType<typeof detectLanguage>;
   model: string;
+  ownerKey: string;
   threadId: string;
   token: string;
 }) {
-  const { context, language, model, threadId, token } = params;
-  const thread = getChatThread(threadId);
+  const { context, language, model, ownerKey, threadId, token } = params;
+  const thread = getChatThread(threadId, ownerKey);
 
   if (!thread) {
     return null;
@@ -185,8 +186,8 @@ async function maybeCompactThread(params: {
     return thread;
   }
 
-  replaceChatMessages(threadId, compactedMessages);
-  return getChatThread(threadId);
+  replaceChatMessages(threadId, ownerKey, compactedMessages);
+  return getChatThread(threadId, ownerKey);
 }
 
 export async function POST(request: Request) {
@@ -208,9 +209,10 @@ export async function POST(request: Request) {
     typeof payload.threadId === "string" ? payload.threadId.trim() : "";
   let messages = normalizeMessages(payload.messages);
   let context = normalizeContext(payload.context);
+  const ownerKey = await readChatOwnerKey();
 
   if (threadId && providedMessage) {
-    const thread = getChatThread(threadId);
+    const thread = getChatThread(threadId, ownerKey);
 
     if (!thread) {
       return NextResponse.json({ error: "Thread not found." }, { status: 404 });
@@ -250,7 +252,7 @@ export async function POST(request: Request) {
   }
 
   if (threadId && providedMessage) {
-    appendChatMessage(threadId, {
+    appendChatMessage(threadId, ownerKey, {
       role: "user",
       content: providedMessage,
     });
@@ -260,6 +262,7 @@ export async function POST(request: Request) {
         context,
         language,
         model: resolvedModel,
+        ownerKey,
         threadId,
         token,
       });
@@ -278,7 +281,7 @@ export async function POST(request: Request) {
     });
 
     if (threadId) {
-      appendChatMessage(threadId, {
+      appendChatMessage(threadId, ownerKey, {
         role: "assistant",
         content: fallbackMessage,
       });
@@ -318,7 +321,7 @@ export async function POST(request: Request) {
       let thread = null;
 
       if (threadId) {
-        appendChatMessage(threadId, {
+        appendChatMessage(threadId, ownerKey, {
           role: "assistant",
           content: fallbackMessage,
         });
@@ -328,11 +331,12 @@ export async function POST(request: Request) {
             context,
             language,
             model: resolvedModel,
+            ownerKey,
             threadId,
             token,
           });
         } else {
-          thread = getChatThread(threadId);
+          thread = getChatThread(threadId, ownerKey);
         }
       }
 
@@ -349,20 +353,21 @@ export async function POST(request: Request) {
     let thread = null;
 
     if (threadId) {
-      appendChatMessage(threadId, {
-        role: "assistant",
-        content,
-      });
+      appendChatMessage(threadId, ownerKey, {
+          role: "assistant",
+          content,
+        });
 
       thread = token
         ? await maybeCompactThread({
             context,
             language,
             model: resolvedModel,
+            ownerKey,
             threadId,
             token,
           })
-        : getChatThread(threadId);
+        : getChatThread(threadId, ownerKey);
     }
 
     return NextResponse.json({
@@ -382,7 +387,7 @@ export async function POST(request: Request) {
     let thread = null;
 
     if (threadId) {
-      appendChatMessage(threadId, {
+      appendChatMessage(threadId, ownerKey, {
         role: "assistant",
         content: fallbackMessage,
       });
@@ -392,11 +397,12 @@ export async function POST(request: Request) {
           context,
           language,
           model: resolvedModel,
+          ownerKey,
           threadId,
           token,
         });
       } else {
-        thread = getChatThread(threadId);
+        thread = getChatThread(threadId, ownerKey);
       }
     }
 
